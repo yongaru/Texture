@@ -259,7 +259,7 @@ static std::atomic_bool static_retainsSublayoutLayoutElements = ATOMIC_VAR_INIT(
     } else if (sublayoutsCount > 0){
       std::vector<Context> sublayoutContexts;
       for (ASLayout *sublayout in sublayouts) {
-        sublayoutContexts.push_back({sublayout, context.absolutePosition + sublayout.position});
+        sublayoutContexts.push_back({sublayout, absolutePosition + sublayout.position});
       }
       queue.insert(queue.cbegin(), sublayoutContexts.begin(), sublayoutContexts.end());
     }
@@ -270,6 +270,27 @@ static std::atomic_bool static_retainsSublayoutLayoutElements = ATOMIC_VAR_INIT(
   // to ensure sublayout elements are retained until the layouts are applied.
   layout.retainSublayoutLayoutElements = YES;
   return layout;
+}
+
+#pragma mark - Equality Checking
+
+- (BOOL)isEqual:(id)object
+{
+  ASLayout *layout = ASDynamicCast(object, ASLayout);
+  if (layout == nil) {
+    return NO;
+  }
+
+  if (!CGSizeEqualToSize(_size, layout.size)) return NO;
+  if (!CGPointEqualToPoint(_position, layout.position)) return NO;
+  if (_layoutElement != layout.layoutElement) return NO;
+
+  NSArray *sublayouts = layout.sublayouts;
+  if (sublayouts != _sublayouts && (sublayouts == nil || _sublayouts == nil || ![_sublayouts isEqual:sublayouts])) {
+    return NO;
+  }
+
+  return YES;
 }
 
 #pragma mark - Accessors
@@ -366,30 +387,6 @@ static std::atomic_bool static_retainsSublayoutLayoutElements = ATOMIC_VAR_INIT(
     && ASObjectIsEqual(self.sublayouts, layout.sublayouts);
   }
   return NO;
-}
-
-@end
-
-@implementation ASLayout (Deprecation)
-
-- (id <ASLayoutElement>)layoutableObject
-{
-  return self.layoutElement;
-}
-
-+ (instancetype)layoutWithLayoutableObject:(id<ASLayoutElement>)layoutElement
-                      constrainedSizeRange:(ASSizeRange)constrainedSizeRange
-                                      size:(CGSize)size
-{
-  return [self layoutWithLayoutElement:layoutElement size:size];
-}
-
-+ (instancetype)layoutWithLayoutableObject:(id<ASLayoutElement>)layoutElement
-                      constrainedSizeRange:(ASSizeRange)constrainedSizeRange
-                                      size:(CGSize)size
-                                sublayouts:(nullable NSArray<ASLayout *> *)sublayouts
-{
-  return [self layoutWithLayoutElement:layoutElement size:size sublayouts:sublayouts];
 }
 
 @end

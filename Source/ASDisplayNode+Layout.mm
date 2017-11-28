@@ -58,15 +58,6 @@
 
 - (ASLayout *)layoutThatFits:(ASSizeRange)constrainedSize
 {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  // For now we just call the deprecated measureWithSizeRange: method to not break old API
-  return [self measureWithSizeRange:constrainedSize];
-#pragma clang diagnostic pop
-}
-
-- (ASLayout *)measureWithSizeRange:(ASSizeRange)constrainedSize
-{
   return [self layoutThatFits:constrainedSize parentSize:constrainedSize.max];
 }
 
@@ -128,8 +119,6 @@ ASLayoutElementStyleExtensibilityForwarding
 {
   return [ASTraitCollection traitCollectionWithASPrimitiveTraitCollection:self.primitiveTraitCollection];
 }
-
-ASPrimitiveTraitCollectionDeprecatedImplementation
 
 #pragma mark - ASLayoutElementAsciiArtProtocol
 
@@ -224,8 +213,9 @@ ASPrimitiveTraitCollectionDeprecatedImplementation
  * @discussion The size of a root node is determined by each subnode. Calling invalidateSize will let the root node know
  * that the intrinsic size of the receiver node is no longer valid and a resizing of the root node needs to happen.
  */
-- (void)_setNeedsLayoutFromAbove
+- (void)_u_setNeedsLayoutFromAbove
 {
+  ASDisplayNodeAssertLockUnownedByCurrentThread(__instanceLock);
   as_activity_create_for_scope("Set needs layout from above");
   ASDisplayNodeAssertThreadAffinity(self);
 
@@ -240,7 +230,7 @@ ASPrimitiveTraitCollectionDeprecatedImplementation
   
   if (supernode) {
     // Threading model requires that we unlock before calling a method on our parent.
-    [supernode _setNeedsLayoutFromAbove];
+    [supernode _u_setNeedsLayoutFromAbove];
   } else {
     // Let the root node method know that the size was invalidated
     [self _rootNodeDidInvalidateSize];
@@ -300,8 +290,10 @@ ASPrimitiveTraitCollectionDeprecatedImplementation
   }
 }
 
-- (void)_locked_measureNodeWithBoundsIfNecessary:(CGRect)bounds
+- (void)_u_measureNodeWithBoundsIfNecessary:(CGRect)bounds
 {
+  ASDisplayNodeAssertLockUnownedByCurrentThread(__instanceLock);
+  ASDN::MutexLocker l(__instanceLock__);
   // Check if we are a subnode in a layout transition.
   // In this case no measurement is needed as it's part of the layout transition
   if ([self _isLayoutTransitionInvalid]) {
@@ -381,8 +373,10 @@ ASPrimitiveTraitCollectionDeprecatedImplementation
     // In this case, we need to detect that we've already asked to be resized to match this
     // particular ASLayout object, and shouldn't loop asking again unless we have a different ASLayout.
     nextLayout->requestedLayoutFromAbove = YES;
-    [self _setNeedsLayoutFromAbove];
-    // Update the layout's version here because _setNeedsLayoutFromAbove calls __setNeedsLayout which in turn increases _layoutVersion
+    __instanceLock__.unlock();
+    [self _u_setNeedsLayoutFromAbove];
+    __instanceLock__.lock();
+    // Update the layout's version here because _u_setNeedsLayoutFromAbove calls __setNeedsLayout which in turn increases _layoutVersion
     // Failing to do this will cause the layout to be invalid immediately 
     nextLayout->version = _layoutVersion;
   }
@@ -402,7 +396,7 @@ ASPrimitiveTraitCollectionDeprecatedImplementation
 
 - (ASSizeRange)_locked_constrainedSizeForLayoutPass
 {
-  // TODO: The logic in -_setNeedsLayoutFromAbove seems correct and doesn't use this method.
+  // TODO: The logic in -_u_setNeedsLayoutFromAbove seems correct and doesn't use this method.
   // logic seems correct.  For what case does -this method need to do the CGSizeEqual checks?
   // IF WE CAN REMOVE BOUNDS CHECKS HERE, THEN WE CAN ALSO REMOVE "REQUESTED FROM ABOVE" CHECK
   
@@ -522,7 +516,14 @@ ASPrimitiveTraitCollectionDeprecatedImplementation
                 measurementCompletion:(void(^)())completion
 {
   ASDisplayNodeAssertMainThread();
-  [self transitionLayoutWithSizeRange:[self _locked_constrainedSizeForLayoutPass]
+
+  ASSizeRange sizeRange;
+  {
+    ASDN::MutexLocker l(__instanceLock__);
+    sizeRange = [self _locked_constrainedSizeForLayoutPass];
+  }
+
+  [self transitionLayoutWithSizeRange:sizeRange
                              animated:animated
                    shouldMeasureAsync:shouldMeasureAsync
                 measurementCompletion:completion];
@@ -852,8 +853,8 @@ ASPrimitiveTraitCollectionDeprecatedImplementation
   if (pendingLayoutTransition != nil) {
     [self _setCalculatedDisplayNodeLayout:pendingLayoutTransition.pendingLayout];
     [self _completeLayoutTransition:pendingLayoutTransition];
+    [self _pendingLayoutTransitionDidComplete];
   }
-  [self _pendingLayoutTransitionDidComplete];
 }
 
 /**
@@ -933,7 +934,7 @@ ASPrimitiveTraitCollectionDeprecatedImplementation
   // Grab lock after calling out to subclass
   ASDN::MutexLocker l(__instanceLock__);
 
-  // We generate placeholders at measureWithSizeRange: time so that a node is guaranteed to have a placeholder ready to go.
+  // We generate placeholders at -layoutThatFits: time so that a node is guaranteed to have a placeholder ready to go.
   // This is also because measurement is usually asynchronous, but placeholders need to be set up synchronously.
   // First measurement is guaranteed to be before the node is onscreen, so we can create the image async. but still have it appear sync.
   if (_placeholderEnabled && !_placeholderImage && [self _locked_displaysAsynchronously]) {
